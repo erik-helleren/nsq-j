@@ -5,6 +5,13 @@ import com.google.common.base.MoreObjects;
 import java.util.List;
 import java.util.Optional;
 
+import com.github.dockerjava.core.DockerClientConfig;
+import com.github.dockerjava.core.DockerClientImpl;
+import com.github.dockerjava.core.DefaultDockerClientConfig;
+import com.github.dockerjava.okhttp.OkDockerHttpClient;
+import com.github.dockerjava.transport.DockerHttpClient;
+import com.github.dockerjava.api.DockerClient;
+
 public class NsqDockerCluster {
     public static class Builder {
         private int nsqdCount;
@@ -41,7 +48,18 @@ public class NsqDockerCluster {
 
         public NsqDockerCluster start() {
             // TODO: Fill in startup implementation
-            return new NsqDockerCluster(java.util.Collections.emptyList(), Optional.empty());
+            final DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
+                .build();
+            final DockerHttpClient dockerHttpClient = new OkDockerHttpClient.Builder()
+                .dockerHost(config.getDockerHost())
+                .sslConfig(config.getSSLConfig())
+                .build();
+            final DockerClient dockerClient = DockerClientImpl.getInstance(config, dockerHttpClient);
+            dockerClient.pingCmd().exec();
+            return new NsqDockerCluster(
+                dockerClient,
+                java.util.Collections.emptyList(),
+                Optional.empty());
         }
     }
 
@@ -86,11 +104,14 @@ public class NsqDockerCluster {
         }
     }
 
+    private final DockerClient dockerClient;
     private final List<NsqdNode> nsqds;
     private final Optional<NsqLookupNode> lookup;
 
-    public NsqDockerCluster(final List<NsqdNode> nsqds,
+    public NsqDockerCluster(final DockerClient dockerClient,
+                            final List<NsqdNode> nsqds,
                             final Optional<NsqLookupNode> lookup)  {
+        this.dockerClient = dockerClient;
         this.nsqds = nsqds;
         this.lookup = lookup;
     }

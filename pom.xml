@@ -184,6 +184,18 @@
             <version>31.1-jre</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java</artifactId>
+            <version>3.2.13</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java-transport-okhttp</artifactId>
+            <version>3.2.13</version>
+            <scope>test</scope>
+        </dependency>
 
     </dependencies>
 

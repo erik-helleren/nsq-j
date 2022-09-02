@@ -38,8 +38,8 @@ public class ExampleClusterIT {
             logger.info("The lookup is present, at host and port: {}", lookup.get().getHostAndPort());
         }
 
-        final NsqDockerCluster.NsqdNode firstNode = cluster.getNsqdNodes().get(0);
-        if (firstNode != null) {
+        if (cluster.getNsqdNodes().size() > 0) {
+            final NsqDockerCluster.NsqdNode firstNode = cluster.getNsqdNodes().get(0);
             logger.info("Disconnecting the network for node: {}", firstNode);
             cluster.disconnectNetworkFor(firstNode);
             logger.info("Disconnected the network for node: {}", firstNode);
