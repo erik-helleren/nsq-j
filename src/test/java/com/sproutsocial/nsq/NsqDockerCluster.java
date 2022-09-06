@@ -1,9 +1,14 @@
 package com.sproutsocial.nsq;
 
 import com.google.common.base.MoreObjects;
+import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
+import java.net.ServerSocket;
+import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
@@ -18,30 +23,36 @@ import com.github.dockerjava.okhttp.OkDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerResponse;
+import com.github.dockerjava.api.model.PortBinding;
+import com.github.dockerjava.api.model.Ports;
+import com.github.dockerjava.api.model.ExposedPort;
 
 public class NsqDockerCluster {
     public static class ContainerConfig {
         public String image;
         public String nameFormat;
-        public String entryPointFormat;
+        public String cmdFormat;
 
         public ContainerConfig(final String image,
                                final String nameFormat,
-                               final String entryPointFormat) {
+                               final String cmdFormat) {
             this.image = image;
             this.nameFormat = nameFormat;
-            this.entryPointFormat = entryPointFormat;
+            this.cmdFormat = cmdFormat;
         }
     }
 
     public static class CreatedContainer {
         public String containerId;
         public String name;
+        public Map<String, PortBinding> exposedPortsByName;
 
         public CreatedContainer(final String containerId,
-                                final String name) {
+                                final String name,
+                                final Map<String, PortBinding> exposedPortsByName) {
             this.containerId = containerId;
             this.name = name;
+            this.exposedPortsByName = exposedPortsByName;
         }
     }
 
@@ -88,7 +99,7 @@ public class NsqDockerCluster {
             return this;
         }
 
-        public Builder withLookupImage(final ContainerConfig config) {
+        public Builder withLookupConfig(final ContainerConfig config) {
             this.lookupConfig = config;
             return this;
         }
@@ -112,12 +123,20 @@ public class NsqDockerCluster {
 
         private CreatedContainers createAndStartContainers(final DockerClient dockerClient) {
             final List<Future<CreatedContainer>> lookupContainers = createContainers(
-                dockerClient, lookupConfig, 1, ImmutableList.of());
+                dockerClient,
+                lookupConfig,
+                1,
+                ImmutableList.of(),
+                ImmutableMap.of("http_port", ExposedPort.tcp(4161)));
             final ImmutableList.Builder<NsqdNode> nsqdNodes = new ImmutableList.Builder<>();
             final NsqLookupNode lookupNode;
             try {
                 final List<Future<CreatedContainer>> nsqdContainers = createContainers(
-                    dockerClient, nsqdConfig, nsqdCount, ImmutableList.of(lookupContainers.get(0).get().name, "$${containerName}"));
+                    dockerClient,
+                    nsqdConfig,
+                    nsqdCount,
+                    ImmutableList.of(lookupContainers.get(0).get().name, "$${containerName}"),
+                    ImmutableMap.of("binary_port", ExposedPort.tcp(4150)));
 
                 lookupNode = new NsqLookupNode(lookupContainers.get(0).get().containerId, HostAndPort.fromParts("127.0.0.1", 4151));
 
@@ -137,35 +156,56 @@ public class NsqDockerCluster {
         private final List<Future<CreatedContainer>> createContainers(final DockerClient dockerClient,
                                                                       final ContainerConfig config,
                                                                       final int count,
-                                                                      final List<String> entryPointBinds) {
+                                                                      final List<String> cmdBindings,
+                                                                      final Map<String, ExposedPort> exposedPorts) {
             final ImmutableList.Builder<Future<CreatedContainer>> createdContainers = new ImmutableList.Builder<>();
             for (int i = 0; i < count; i++) {
                 final String containerName = String.format(config.nameFormat, i);
-                final String entryPoint = buildEntryPoint(containerName, config.entryPointFormat, entryPointBinds);
+                final List<String> cmd = buildCmd(containerName, config.cmdFormat, cmdBindings);
+                final Map<String, PortBinding> allocatedPorts = exposedPorts.entrySet()
+                    .stream()
+                    .collect(Collectors.toMap(
+                                 entry -> entry.getKey(),
+                                 entry -> new PortBinding(Ports.Binding.bindPort(randomPort()), entry.getValue())));
                 createdContainers.add(executor.submit(() -> {
                             final CreateContainerResponse response = dockerClient.createContainerCmd(config.image)
                                 .withName(containerName)
-                                .withEntrypoint(entryPoint)
+                                .withCmd(cmd)
+                                .withPortBindings(allocatedPorts.values().stream().toArray(PortBinding[]::new))
                                 .exec();
-                            return new CreatedContainer(response.getId(), containerName);
+                            return new CreatedContainer(response.getId(), containerName, allocatedPorts);
                         }));
             }
             return createdContainers.build();
         }
 
-        private final String buildEntryPoint(final String containerName,
-                                             final String format,
-                                             final List<String> bindings) {
+        private final List<String> buildCmd(final String containerName,
+                                            final String format,
+                                            final List<String> bindings) {
             final List<String> substituted = bindings.stream()
-                .map(binding -> {
-                        if (binding.equals("$${containerName}")) {
-                            return containerName;
-                        } else {
-                            return binding;
-                        }
-                    })
+                .map(binding -> binding.replace("$${containerName}", containerName))
                 .collect(Collectors.toList());
-            return String.format(format, substituted.stream().toArray(String[]::new));
+            return Splitter.on(" ")
+                .splitToList(String.format(format, substituted.stream().toArray(String[]::new)));
+        }
+
+        // Get a random, locally available port allocated to us.
+        private final int randomPort() {
+            ServerSocket serverSocket = null;
+            try {
+                serverSocket = new ServerSocket(0);
+                return serverSocket.getLocalPort();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            } finally {
+                if (serverSocket != null) {
+                    try {
+                        serverSocket.close();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
         }
     }
 
