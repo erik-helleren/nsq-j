@@ -126,6 +126,7 @@ public class NsqDockerCluster {
             dockerClient.pingCmd().exec();
             final CreatedContainers containers = createAndStartContainers(dockerClient);
             return new NsqDockerCluster(
+                executor,
                 dockerClient,
                 containers.nsqdNodes,
                 containers.lookupNode);
@@ -289,13 +290,16 @@ public class NsqDockerCluster {
         }
     }
 
+    private final ExecutorService executor;
     private final DockerClient dockerClient;
     private final List<NsqdNode> nsqds;
     private final NsqLookupNode lookup;
 
-    public NsqDockerCluster(final DockerClient dockerClient,
+    public NsqDockerCluster(final ExecutorService executor,
+                            final DockerClient dockerClient,
                             final List<NsqdNode> nsqds,
                             final NsqLookupNode lookup)  {
+        this.executor = executor;
         this.dockerClient = dockerClient;
         this.nsqds = nsqds;
         this.lookup = lookup;
@@ -313,8 +317,18 @@ public class NsqDockerCluster {
         return lookup;
     }
 
+    public final List<String> getAllContainerIds() {
+        final ImmutableList.Builder<String> containerIds = new ImmutableList.Builder<>();
+        containerIds.add(lookup.containerId);
+        for (final NsqdNode nsqd : nsqds) {
+            containerIds.add(nsqd.containerId);
+        }
+        return containerIds.build();
+    }
+
     public void shutdown() {
-        // TODO: Implement shutdown and cleanup of the cluster
+        stopContainers();
+        removeContainers();
     }
 
     public void disconnectNetworkFor(final ConnectableNode node) {
@@ -323,5 +337,57 @@ public class NsqDockerCluster {
 
     public void reconnectNetworkFor(final ConnectableNode node) {
         // TODO: Re-connect the host from the underlying docker network
+    }
+
+    private void stopContainers() {
+        final List<String> containerIds = getAllContainerIds();
+        final List<Callable<Void>> tasks = containerIds.stream()
+            .map(containerId -> new Callable<Void>() {
+                    @Override
+                    public Void call() {
+                        dockerClient.stopContainerCmd(containerId).exec();
+                        return null;
+                    }
+                })
+            .collect(Collectors.toList());
+
+        try {
+            final List<Future<Void>> futures = executor.invokeAll(tasks);
+            for (final Future<Void> f : futures) {
+                // Block until the task is done.
+                f.get();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during container stop");
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void removeContainers() {
+        final List<String> containerIds = getAllContainerIds();
+        final List<Callable<Void>> tasks = containerIds.stream()
+            .map(containerId -> new Callable<Void>() {
+                    @Override
+                    public Void call() {
+                        dockerClient.removeContainerCmd(containerId).exec();
+                        return null;
+                    }
+                })
+            .collect(Collectors.toList());
+
+        try {
+            final List<Future<Void>> futures = executor.invokeAll(tasks);
+            for (final Future<Void> f : futures) {
+                // Block until the task is done.
+                f.get();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during container stop");
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

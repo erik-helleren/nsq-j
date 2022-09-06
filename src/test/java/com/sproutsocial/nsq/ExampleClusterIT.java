@@ -28,7 +28,7 @@ public class ExampleClusterIT {
     }
 
     @Test
-    public void disconnectConnectNetworkExample() {
+    public void disconnectConnectNetworkExample() throws Exception {
         for (final NsqDockerCluster.NsqdNode nsqd : cluster.getNsqdNodes()) {
             logger.info("The nsqd host and port is: {}", nsqd.getHostAndPort());
         }
@@ -45,5 +45,7 @@ public class ExampleClusterIT {
             cluster.reconnectNetworkFor(firstNode);
             logger.info("Re-enabled the network for node: {}", firstNode);
         }
+        logger.info("Sleeping for 30 seconds before shutting down cluster");
+        Thread.sleep(30_000);
     }
 }
