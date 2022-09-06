@@ -19,7 +19,6 @@ public class ExampleClusterIT {
     public void setup() {
         cluster = NsqDockerCluster.builder()
             .withNsqdCount(3)
-            .withLookupNode(true)
             .start();
     }
 
@@ -33,10 +32,8 @@ public class ExampleClusterIT {
         for (final NsqDockerCluster.NsqdNode nsqd : cluster.getNsqdNodes()) {
             logger.info("The nsqd host and port is: {}", nsqd.getHostAndPort());
         }
-        final Optional<NsqDockerCluster.NsqLookupNode> lookup = cluster.getLookupNode();
-        if (lookup.isPresent()) {
-            logger.info("The lookup is present, at host and port: {}", lookup.get().getHostAndPort());
-        }
+        final NsqDockerCluster.NsqLookupNode lookup = cluster.getLookupNode();
+        logger.info("The lookup is at host and port: {}", lookup.getHostAndPort());
 
         if (cluster.getNsqdNodes().size() > 0) {
             final NsqDockerCluster.NsqdNode firstNode = cluster.getNsqdNodes().get(0);

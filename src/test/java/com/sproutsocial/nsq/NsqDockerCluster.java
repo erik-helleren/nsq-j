@@ -19,18 +19,62 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 
 public class NsqDockerCluster {
+    public static class ContainerConfig {
+        public String image;
+        public String nameFormat;
+        public String entryPointFormat;
+
+        public ContainerConfig(final String image,
+                               final String nameFormat,
+                               final String entryPointFormat) {
+            this.image = image;
+            this.nameFormat = nameFormat;
+            this.entryPointFormat = entryPointFormat;
+        }
+    }
+
+    public static class CreatedContainer {
+        public String containerId;
+        public String name;
+
+        public CreatedContainer(final String containerId,
+                                final String name) {
+            this.containerId = containerId;
+            this.name = name;
+        }
+    }
+
+    private static class CreatedContainers {
+        public List<NsqdNode> nsqdNodes;
+        public NsqLookupNode lookupNode;
+
+        public CreatedContainers(final List<NsqdNode> nsqdNodes,
+                                 final NsqLookupNode lookupNode) {
+            this.nsqdNodes = nsqdNodes;
+            this.lookupNode = lookupNode;
+        }
+    }
+
+    private static final ContainerConfig DEFAULT_NSQD_CONFIG = new ContainerConfig(
+        "nsqio/nsq:v0.3.8",
+        "nsqd-cluster-%d",
+        "/nsqd --lookupd-tcp-address=%s --broadcast-address=%s");
+
+    private static final ContainerConfig DEFAULT_LOOKUP_CONFIG = new ContainerConfig(
+        "nsqio/nsq:v0.3.8",
+        "nsq-lookup-cluster-%d",
+        "/nsqlookupd");
+
     public static class Builder {
         private final ExecutorService executor = Executors.newFixedThreadPool(4);
         private int nsqdCount;
-        private String nsqdImage;
-        private String lookupImage;
-        private boolean createLookupNode;
+        private ContainerConfig nsqdConfig;
+        private ContainerConfig lookupConfig;
 
         public Builder() {
             this.nsqdCount = 1;
-            this.nsqdImage = "nsqio/nsq:v0.3.8";
-            this.lookupImage = "nsqio/nsq:v0.3.8";
-            this.createLookupNode = true;
+            this.nsqdConfig = DEFAULT_NSQD_CONFIG;
+            this.lookupConfig = DEFAULT_LOOKUP_CONFIG;
         }
 
         public Builder withNsqdCount(final int count) {
@@ -38,18 +82,13 @@ public class NsqDockerCluster {
             return this;
         }
 
-        public Builder withNsqdImage(final String image) {
-            this.nsqdImage = image;
+        public Builder withNsqdConfig(final ContainerConfig config) {
+            this.nsqdConfig = config;
             return this;
         }
 
-        public Builder withLookupImage(final String image) {
-            this.lookupImage = image;
-            return this;
-        }
-
-        public Builder withLookupNode(final boolean enabled) {
-            this.createLookupNode = enabled;
+        public Builder withLookupImage(final ContainerConfig config) {
+            this.lookupConfig = config;
             return this;
         }
 
@@ -71,21 +110,19 @@ public class NsqDockerCluster {
         }
 
         private CreatedContainers createAndStartContainers(final DockerClient dockerClient) {
-            final List<Future<String>> nsqdContainerIds = createContainers(dockerClient, nsqdImage, nsqdCount);
-
-            Optional<NsqLookupNode> lookupNode = Optional.empty();
+            final List<Future<CreatedContainer>> lookupContainers = createContainers(
+                dockerClient, lookupConfig, 1, ImmutableList.of());
             final ImmutableList.Builder<NsqdNode> nsqdNodes = new ImmutableList.Builder<>();
-
+            final NsqLookupNode lookupNode;
             try {
-                if (createLookupNode) {
-                    final List<Future<String>> lookupContainerId = createContainers(dockerClient, lookupImage, 1);
-                    // TODO: Fix hardcoded hostname and port, after we setup port forwarding
-                    lookupNode = Optional.of(new NsqLookupNode(lookupContainerId.get(0).get(), HostAndPort.fromParts("127.0.0.1", 4151)));
-                }
+                final List<Future<CreatedContainer>> nsqdContainers = createContainers(
+                    dockerClient, nsqdConfig, nsqdCount, ImmutableList.of(lookupContainers.get(0).get().name, "nsq-broadcast"));
 
-                for (final Future<String> containerId : nsqdContainerIds) {
+                lookupNode = new NsqLookupNode(lookupContainers.get(0).get().containerId, HostAndPort.fromParts("127.0.0.1", 4151));
+
+                for (final Future<CreatedContainer> createdNsqd : nsqdContainers) {
                     // TODO: Fix hardcoded hostname and port, after we setup port forwarding
-                    nsqdNodes.add(new NsqdNode(containerId.get(), HostAndPort.fromParts("127.0.0.1", 4151)));
+                    nsqdNodes.add(new NsqdNode(createdNsqd.get().containerId, HostAndPort.fromParts("127.0.0.1", 4151)));
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -96,28 +133,23 @@ public class NsqDockerCluster {
             return new CreatedContainers(nsqdNodes.build(), lookupNode);
         }
 
-        private final List<Future<String>> createContainers(final DockerClient dockerClient,
-                                                            final String image,
-                                                            final int count) {
-            final ImmutableList.Builder<Future<String>> containerIds = new ImmutableList.Builder<>();
+        private final List<Future<CreatedContainer>> createContainers(final DockerClient dockerClient,
+                                                                      final ContainerConfig config,
+                                                                      final int count,
+                                                                      final List<String> entryPointBinds) {
+            final ImmutableList.Builder<Future<CreatedContainer>> createdContainers = new ImmutableList.Builder<>();
             for (int i = 0; i < count; i++) {
-                containerIds.add(executor.submit(() -> {
-                            final CreateContainerResponse response = dockerClient.createContainerCmd(image).exec();
-                            return response.getId();
+                final String containerName = String.format(config.nameFormat, i);
+                final String entryPoint = String.format(config.entryPointFormat, entryPointBinds.stream().toArray(String[]::new));
+                createdContainers.add(executor.submit(() -> {
+                            final CreateContainerResponse response = dockerClient.createContainerCmd(config.image)
+                                .withName(containerName)
+                                .withEntrypoint(entryPoint)
+                                .exec();
+                            return new CreatedContainer(response.getId(), containerName);
                         }));
             }
-            return containerIds.build();
-        }
-    }
-
-    private static class CreatedContainers {
-        public List<NsqdNode> nsqdNodes;
-        public Optional<NsqLookupNode> lookupNode;
-
-        public CreatedContainers(final List<NsqdNode> nsqdNodes,
-                                 final Optional<NsqLookupNode> lookupNode) {
-            this.nsqdNodes = nsqdNodes;
-            this.lookupNode = lookupNode;
+            return createdContainers.build();
         }
     }
 
@@ -164,11 +196,11 @@ public class NsqDockerCluster {
 
     private final DockerClient dockerClient;
     private final List<NsqdNode> nsqds;
-    private final Optional<NsqLookupNode> lookup;
+    private final NsqLookupNode lookup;
 
     public NsqDockerCluster(final DockerClient dockerClient,
                             final List<NsqdNode> nsqds,
-                            final Optional<NsqLookupNode> lookup)  {
+                            final NsqLookupNode lookup)  {
         this.dockerClient = dockerClient;
         this.nsqds = nsqds;
         this.lookup = lookup;
@@ -182,7 +214,7 @@ public class NsqDockerCluster {
         return nsqds;
     }
 
-    public final Optional<NsqLookupNode> getLookupNode() {
+    public final NsqLookupNode getLookupNode() {
         return lookup;
     }
 
