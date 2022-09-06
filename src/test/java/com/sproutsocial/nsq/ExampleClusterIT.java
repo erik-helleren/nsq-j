@@ -45,7 +45,7 @@ public class ExampleClusterIT {
             cluster.reconnectNetworkFor(firstNode);
             logger.info("Re-enabled the network for node: {}", firstNode);
         }
-        logger.info("Sleeping for 30 seconds before shutting down cluster");
-        Thread.sleep(30_000);
+        logger.info("Sleeping for 10 seconds before shutting down cluster");
+        Thread.sleep(10_000);
     }
 }

@@ -15,6 +15,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import com.github.dockerjava.core.DockerClientConfig;
@@ -195,28 +196,9 @@ public class NsqDockerCluster {
         }
 
         private final void startContainers(final DockerClient dockerClient, final List<String> containerIds) {
-            final List<Callable<Void>> tasks = containerIds.stream()
-                .map(containerId -> new Callable<Void>() {
-                        @Override
-                        public Void call() {
-                            dockerClient.startContainerCmd(containerId).exec();
-                            return null;
-                        }
-                    })
-                .collect(Collectors.toList());
-
-            try {
-                final List<Future<Void>> futures = executor.invokeAll(tasks);
-                for (final Future<Void> f : futures) {
-                    // Block until the task is done.
-                    f.get();
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Interrupted during container creation and start");
-            } catch (ExecutionException e) {
-                throw new RuntimeException(e);
-            }
+            NsqDockerCluster.executeForAllContainers(
+                executor, containerIds,
+                containerId -> dockerClient.startContainerCmd(containerId).exec());
         }
 
         private final List<String> buildCmd(final String containerName,
@@ -340,38 +322,25 @@ public class NsqDockerCluster {
     }
 
     private void stopContainers() {
-        final List<String> containerIds = getAllContainerIds();
-        final List<Callable<Void>> tasks = containerIds.stream()
-            .map(containerId -> new Callable<Void>() {
-                    @Override
-                    public Void call() {
-                        dockerClient.stopContainerCmd(containerId).exec();
-                        return null;
-                    }
-                })
-            .collect(Collectors.toList());
-
-        try {
-            final List<Future<Void>> futures = executor.invokeAll(tasks);
-            for (final Future<Void> f : futures) {
-                // Block until the task is done.
-                f.get();
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted during container stop");
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e);
-        }
+        executeForAllContainers(
+            executor, getAllContainerIds(),
+            containerId -> dockerClient.stopContainerCmd(containerId).exec());
     }
 
     private void removeContainers() {
-        final List<String> containerIds = getAllContainerIds();
+        executeForAllContainers(
+            executor, getAllContainerIds(),
+            containerId -> dockerClient.removeContainerCmd(containerId).exec());
+    }
+
+    private static void executeForAllContainers(final ExecutorService executor,
+                                                final List<String> containerIds,
+                                                final Consumer<String> executeFn) {
         final List<Callable<Void>> tasks = containerIds.stream()
             .map(containerId -> new Callable<Void>() {
                     @Override
                     public Void call() {
-                        dockerClient.removeContainerCmd(containerId).exec();
+                        executeFn.accept(containerId);
                         return null;
                     }
                 })
@@ -385,7 +354,7 @@ public class NsqDockerCluster {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted during container stop");
+            throw new RuntimeException("Interrupted during container execution");
         } catch (ExecutionException e) {
             throw new RuntimeException(e);
         }
