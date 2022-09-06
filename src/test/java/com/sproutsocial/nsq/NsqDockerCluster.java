@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -64,6 +65,15 @@ public class NsqDockerCluster {
                                  final NsqLookupNode lookupNode) {
             this.nsqdNodes = nsqdNodes;
             this.lookupNode = lookupNode;
+        }
+
+        public final List<String> getAllContainerIds() {
+            final ImmutableList.Builder<String> containerIds = new ImmutableList.Builder<>();
+            containerIds.add(lookupNode.containerId);
+            for (final NsqdNode nsqd : nsqdNodes) {
+                containerIds.add(nsqd.containerId);
+            }
+            return containerIds.build();
         }
     }
 
@@ -127,7 +137,7 @@ public class NsqDockerCluster {
                 lookupConfig,
                 1,
                 ImmutableList.of(),
-                ImmutableMap.of("http_port", ExposedPort.tcp(4161)));
+                ImmutableMap.of("tcp_port", ExposedPort.tcp(4160), "http_port", ExposedPort.tcp(4161)));
             final ImmutableList.Builder<NsqdNode> nsqdNodes = new ImmutableList.Builder<>();
             final NsqLookupNode lookupNode;
             try {
@@ -135,8 +145,10 @@ public class NsqDockerCluster {
                     dockerClient,
                     nsqdConfig,
                     nsqdCount,
-                    ImmutableList.of(lookupContainers.get(0).get().name, "$${containerName}"),
-                    ImmutableMap.of("binary_port", ExposedPort.tcp(4150)));
+                    ImmutableList.of(String.format(
+                                         "%s:%d", lookupContainers.get(0).get().name, 4160),// Lookup TCP hostname and port
+                                     "$${containerName}"), // What address this nsqd is going to broadcast to the lookup
+                    ImmutableMap.of("tcp_port", ExposedPort.tcp(4150)));
 
                 lookupNode = new NsqLookupNode(lookupContainers.get(0).get().containerId, HostAndPort.fromParts("127.0.0.1", 4151));
 
@@ -144,6 +156,8 @@ public class NsqDockerCluster {
                     // TODO: Fix hardcoded hostname and port, after we setup port forwarding
                     nsqdNodes.add(new NsqdNode(createdNsqd.get().containerId, HostAndPort.fromParts("127.0.0.1", 4151)));
                 }
+                final CreatedContainers created = new CreatedContainers(nsqdNodes.build(), lookupNode);
+                startContainers(dockerClient, created.getAllContainerIds());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("Interrupted during container creation and start");
@@ -177,6 +191,31 @@ public class NsqDockerCluster {
                         }));
             }
             return createdContainers.build();
+        }
+
+        private final void startContainers(final DockerClient dockerClient, final List<String> containerIds) {
+            final List<Callable<Void>> tasks = containerIds.stream()
+                .map(containerId -> new Callable<Void>() {
+                        @Override
+                        public Void call() {
+                            dockerClient.startContainerCmd(containerId).exec();
+                            return null;
+                        }
+                    })
+                .collect(Collectors.toList());
+
+            try {
+                final List<Future<Void>> futures = executor.invokeAll(tasks);
+                for (final Future<Void> f : futures) {
+                    // Block until the task is done.
+                    f.get();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted during container creation and start");
+            } catch (ExecutionException e) {
+                throw new RuntimeException(e);
+            }
         }
 
         private final List<String> buildCmd(final String containerName,
