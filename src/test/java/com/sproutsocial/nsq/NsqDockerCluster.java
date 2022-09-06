@@ -9,6 +9,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 
 import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
@@ -116,7 +117,7 @@ public class NsqDockerCluster {
             final NsqLookupNode lookupNode;
             try {
                 final List<Future<CreatedContainer>> nsqdContainers = createContainers(
-                    dockerClient, nsqdConfig, nsqdCount, ImmutableList.of(lookupContainers.get(0).get().name, "nsq-broadcast"));
+                    dockerClient, nsqdConfig, nsqdCount, ImmutableList.of(lookupContainers.get(0).get().name, "$${containerName}"));
 
                 lookupNode = new NsqLookupNode(lookupContainers.get(0).get().containerId, HostAndPort.fromParts("127.0.0.1", 4151));
 
@@ -140,7 +141,7 @@ public class NsqDockerCluster {
             final ImmutableList.Builder<Future<CreatedContainer>> createdContainers = new ImmutableList.Builder<>();
             for (int i = 0; i < count; i++) {
                 final String containerName = String.format(config.nameFormat, i);
-                final String entryPoint = String.format(config.entryPointFormat, entryPointBinds.stream().toArray(String[]::new));
+                final String entryPoint = buildEntryPoint(containerName, config.entryPointFormat, entryPointBinds);
                 createdContainers.add(executor.submit(() -> {
                             final CreateContainerResponse response = dockerClient.createContainerCmd(config.image)
                                 .withName(containerName)
@@ -150,6 +151,21 @@ public class NsqDockerCluster {
                         }));
             }
             return createdContainers.build();
+        }
+
+        private final String buildEntryPoint(final String containerName,
+                                             final String format,
+                                             final List<String> bindings) {
+            final List<String> substituted = bindings.stream()
+                .map(binding -> {
+                        if (binding.equals("$${containerName}")) {
+                            return containerName;
+                        } else {
+                            return binding;
+                        }
+                    })
+                .collect(Collectors.toList());
+            return String.format(format, substituted.stream().toArray(String[]::new));
         }
     }
 
