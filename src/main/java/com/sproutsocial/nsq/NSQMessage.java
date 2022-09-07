@@ -63,4 +63,7 @@ class NSQMessage implements Message {
         connection.touch(id);
     }
 
+    SubConnection getConnection() {
+        return connection;
+    }
 }
