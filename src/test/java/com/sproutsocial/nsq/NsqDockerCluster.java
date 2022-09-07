@@ -366,20 +366,21 @@ public class NsqDockerCluster {
     public NsqDockerCluster awaitExposedPorts() {
         while (true) {
             for (final ConnectableNode node : getAllNodes()) {
-                if (!node.allPortsConnectable()) {
+                if (node.allPortsConnectable()) {
+                    continue;
+                } else {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Interrupted during container execution");
+                    }
                     break;
                 }
-
-                logger.info("Cluster is ready: All ports connectable.");
-                return this;
             }
 
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Interrupted during container execution");
-            }
+            logger.info("Cluster is ready: All ports connectable.");
+            return this;
         }
     }
 
