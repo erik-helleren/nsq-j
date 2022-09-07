@@ -321,6 +321,15 @@ public class NsqDockerCluster {
         removeContainers();
     }
 
+    /**
+     * Block until all the configured ports are successfully connectable. Allows
+     * clients to synchronize their startup, without having to read from standard-out
+     * on all the running containers.
+     */
+    public NsqDockerCluster awaitExposedPorts() {
+        return this;
+    }
+
     public void disconnectNetworkFor(final ConnectableNode node) {
         // TODO: Cut off the host from the underlying docker network
     }

@@ -19,7 +19,8 @@ public class ExampleClusterIT {
     public void setup() {
         cluster = NsqDockerCluster.builder()
             .withNsqdCount(3)
-            .start();
+            .start()
+            .awaitExposedPorts();
     }
 
     @After
