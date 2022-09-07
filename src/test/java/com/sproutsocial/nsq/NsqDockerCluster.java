@@ -6,6 +6,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,9 @@ import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.model.PortBinding;
 import com.github.dockerjava.api.model.Ports;
 import com.github.dockerjava.api.model.ExposedPort;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class NsqDockerCluster {
     public static class ContainerConfig {
@@ -79,6 +83,7 @@ public class NsqDockerCluster {
         }
     }
 
+    private static final Logger logger = LoggerFactory.getLogger(NsqDockerCluster.class);
     private static final ContainerConfig DEFAULT_NSQD_CONFIG = new ContainerConfig(
         "nsqio/nsq:v0.3.8",
         "nsqd-cluster-%d-%s",
@@ -156,11 +161,10 @@ public class NsqDockerCluster {
                                      "$${containerName}"), // What address this nsqd is going to broadcast to the lookup
                     ImmutableMap.of("tcp_port", ExposedPort.tcp(4150)));
 
-                lookupNode = new NsqLookupNode(lookupContainers.get(0).get().containerId, HostAndPort.fromParts("127.0.0.1", 4151));
+                lookupNode = new NsqLookupNode(lookupContainers.get(0).get().containerId, lookupContainers.get(0).get().exposedPortsByName);
 
                 for (final Future<CreatedContainer> createdNsqd : nsqdContainers) {
-                    // TODO: Fix hardcoded hostname and port, after we setup port forwarding
-                    nsqdNodes.add(new NsqdNode(createdNsqd.get().containerId, HostAndPort.fromParts("127.0.0.1", 4151)));
+                    nsqdNodes.add(new NsqdNode(createdNsqd.get().containerId, createdNsqd.get().exposedPortsByName));
                 }
                 final CreatedContainers created = new CreatedContainers(nsqdNodes.build(), lookupNode);
                 startContainers(dockerClient, created.getAllContainerIds());
@@ -238,16 +242,16 @@ public class NsqDockerCluster {
 
     public static class ConnectableNode {
         protected final String containerId;
-        protected final HostAndPort hostAndPort;
+        protected final Map<String, HostAndPort> hostAndPorts;
 
         public ConnectableNode(final String containerId,
-                               final HostAndPort hostAndPort) {
+                               final Map<String, HostAndPort> hostAndPorts) {
             this.containerId = containerId;
-            this.hostAndPort = hostAndPort;
+            this.hostAndPorts = hostAndPorts;
         }
 
-        public final HostAndPort getHostAndPort() {
-            return hostAndPort;
+        public final Map<String, HostAndPort> getHostAndPorts() {
+            return hostAndPorts;
         }
 
         public final String getContainerId() {
@@ -257,23 +261,49 @@ public class NsqDockerCluster {
         @Override
         public String toString() {
             return MoreObjects.toStringHelper(this)
-                .add("hostAndPort", hostAndPort)
+                .add("hostAndPorts", hostAndPorts)
                 .add("containerId", containerId)
                 .toString();
+        }
+
+        public boolean allPortsConnectable() {
+            for (final HostAndPort hostAndPort : hostAndPorts.values()) {
+                try (final Socket socket = new Socket(hostAndPort.getHost(), hostAndPort.getPort())) {
+                    logger.info("Successfully connected to host: {}", hostAndPort);
+                } catch (IOException e) {
+                    logger.info("Cannot connect to host: {}, retrying", hostAndPort);
+                    return false;
+                }
+            }
+            logger.info("All host ports on node {} connectable", this);
+            return true;
+        }
+
+        public static final Map<String, HostAndPort> convertPortBindings(final Map<String, PortBinding> portBindings) {
+            return portBindings.entrySet().stream().collect(
+                Collectors.toMap(entry -> entry.getKey(), entry -> HostAndPort.fromParts("127.0.0.1", Integer.parseInt(entry.getValue().getBinding().getHostPortSpec()))));
         }
     }
 
     public static class NsqdNode extends ConnectableNode {
         public NsqdNode(final String containerId,
-                        final HostAndPort hostAndPort) {
-            super(containerId, hostAndPort);
+                        final Map<String, PortBinding> portBindings) {
+            super(containerId, ConnectableNode.convertPortBindings(portBindings));
+        }
+
+        public final HostAndPort getTcpHostAndPort() {
+            return hostAndPorts.get("tcp_port");
         }
     }
 
     public static class NsqLookupNode extends ConnectableNode {
         public NsqLookupNode(final String containerId,
-                             final HostAndPort hostAndPort) {
-            super(containerId, hostAndPort);
+                             final Map<String, PortBinding> portBindings) {
+            super(containerId, ConnectableNode.convertPortBindings(portBindings));
+        }
+
+        public final HostAndPort getTcpHostAndPort() {
+            return hostAndPorts.get("tcp_port");
         }
     }
 
@@ -307,6 +337,13 @@ public class NsqDockerCluster {
         return lookup;
     }
 
+    public final Iterable<ConnectableNode> getAllNodes() {
+        final ImmutableList.Builder<ConnectableNode> nodes  = new ImmutableList.Builder<>();
+        nodes.add(lookup);
+        nodes.addAll(nsqds);
+        return nodes.build();
+    }
+
     public final List<String> getAllContainerIds() {
         final ImmutableList.Builder<String> containerIds = new ImmutableList.Builder<>();
         containerIds.add(lookup.containerId);
@@ -327,7 +364,23 @@ public class NsqDockerCluster {
      * on all the running containers.
      */
     public NsqDockerCluster awaitExposedPorts() {
-        return this;
+        while (true) {
+            for (final ConnectableNode node : getAllNodes()) {
+                if (!node.allPortsConnectable()) {
+                    break;
+                }
+
+                logger.info("Cluster is ready: All ports connectable.");
+                return this;
+            }
+
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted during container execution");
+            }
+        }
     }
 
     public void disconnectNetworkFor(final ConnectableNode node) {

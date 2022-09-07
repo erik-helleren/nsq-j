@@ -31,10 +31,10 @@ public class ExampleClusterIT {
     @Test
     public void disconnectConnectNetworkExample() throws Exception {
         for (final NsqDockerCluster.NsqdNode nsqd : cluster.getNsqdNodes()) {
-            logger.info("The nsqd host and port is: {}", nsqd.getHostAndPort());
+            logger.info("The nsqd host and port is: {}", nsqd.getTcpHostAndPort());
         }
         final NsqDockerCluster.NsqLookupNode lookup = cluster.getLookupNode();
-        logger.info("The lookup is at host and port: {}", lookup.getHostAndPort());
+        logger.info("The lookup is at host and port: {}", lookup.getTcpHostAndPort());
 
         if (cluster.getNsqdNodes().size() > 0) {
             final NsqDockerCluster.NsqdNode firstNode = cluster.getNsqdNodes().get(0);
