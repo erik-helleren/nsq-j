@@ -29,24 +29,17 @@ public class ExampleClusterIT {
     }
 
     @Test
-    public void disconnectConnectNetworkExample() throws Exception {
-        for (final NsqDockerCluster.NsqdNode nsqd : cluster.getNsqdNodes()) {
-            logger.info("The nsqd host and port is: {}", nsqd.getTcpHostAndPort());
+    public void simplePublisher() throws Exception {
+        assertEquals(3, cluster.getNsqdNodes().size());
+        Publisher publisher = null;
+        try {
+            publisher = new Publisher(cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(),
+                                                      cluster.getNsqdNodes().get(1).getTcpHostAndPort().toString());
+            publisher.publish("test_topic", new byte[]{0x01, 0x02, 0x03, 0x04});
+        } finally {
+            if (publisher != null) {
+                publisher.stop();
+            }
         }
-        final NsqDockerCluster.NsqLookupNode lookup = cluster.getLookupNode();
-        logger.info("The lookup is at host and port: {}", lookup.getTcpHostAndPort());
-
-        if (cluster.getNsqdNodes().size() > 0) {
-            final NsqDockerCluster.NsqdNode firstNode = cluster.getNsqdNodes().get(0);
-            logger.info("Disconnecting the network for node: {}", firstNode);
-            cluster.disconnectNetworkFor(firstNode);
-            logger.info("Disconnected the network for node: {}", firstNode);
-
-            logger.info("Re-enabling the network for node: {}", firstNode);
-            cluster.reconnectNetworkFor(firstNode);
-            logger.info("Re-enabled the network for node: {}", firstNode);
-        }
-        logger.info("Sleeping for 10 seconds before shutting down cluster");
-        Thread.sleep(10_000);
     }
 }
