@@ -337,7 +337,7 @@ public class NsqDockerCluster {
         return lookup;
     }
 
-    public final Iterable<ConnectableNode> getAllNodes() {
+    public final List<ConnectableNode> getAllNodes() {
         final ImmutableList.Builder<ConnectableNode> nodes  = new ImmutableList.Builder<>();
         nodes.add(lookup);
         nodes.addAll(nsqds);
@@ -365,22 +365,18 @@ public class NsqDockerCluster {
      */
     public NsqDockerCluster awaitExposedPorts() {
         while (true) {
-            for (final ConnectableNode node : getAllNodes()) {
-                if (node.allPortsConnectable()) {
+            if (getAllNodes().stream().allMatch(ConnectableNode::allPortsConnectable)) {
+                logger.info("Cluster is ready: All ports connectable.");
+                return this;
+            } else {
+                try {
+                    Thread.sleep(1000);
                     continue;
-                } else {
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException("Interrupted during container execution");
-                    }
-                    break;
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted during container execution");
                 }
             }
-
-            logger.info("Cluster is ready: All ports connectable.");
-            return this;
         }
     }
 
