@@ -27,8 +27,10 @@ import com.github.dockerjava.okhttp.OkDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerResponse;
+import com.github.dockerjava.api.command.CreateNetworkResponse;
 import com.github.dockerjava.api.model.PortBinding;
 import com.github.dockerjava.api.model.Ports;
+import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.ExposedPort;
 
 import org.slf4j.Logger;
@@ -64,11 +66,14 @@ public class NsqDockerCluster {
     }
 
     private static class CreatedContainers {
+        public String networkId;
         public List<NsqdNode> nsqdNodes;
         public NsqLookupNode lookupNode;
 
-        public CreatedContainers(final List<NsqdNode> nsqdNodes,
+        public CreatedContainers(final String networkId,
+                                 final List<NsqdNode> nsqdNodes,
                                  final NsqLookupNode lookupNode) {
+            this.networkId = networkId;
             this.nsqdNodes = nsqdNodes;
             this.lookupNode = lookupNode;
         }
@@ -136,16 +141,19 @@ public class NsqDockerCluster {
                 clusterId,
                 executor,
                 dockerClient,
+                containers.networkId,
                 containers.nsqdNodes,
                 containers.lookupNode);
         }
 
         private CreatedContainers createAndStartContainers(final UUID clusterId, final DockerClient dockerClient) {
+            final CreateNetworkResponse createdNetwork = dockerClient.createNetworkCmd().withName(String.format("nsq-%s", clusterId)).exec();
             final List<Future<CreatedContainer>> lookupContainers = createContainers(
                 clusterId,
                 dockerClient,
                 lookupConfig,
                 1,
+                createdNetwork.getId(),
                 ImmutableList.of(),
                 ImmutableMap.of("tcp_port", ExposedPort.tcp(4160), "http_port", ExposedPort.tcp(4161)));
             final ImmutableList.Builder<NsqdNode> nsqdNodes = new ImmutableList.Builder<>();
@@ -156,31 +164,33 @@ public class NsqDockerCluster {
                     dockerClient,
                     nsqdConfig,
                     nsqdCount,
+                    createdNetwork.getId(),
                     ImmutableList.of(String.format(
                                          "%s:%d", lookupContainers.get(0).get().name, 4160),// Lookup TCP hostname and port
                                      "$${containerName}"), // What address this nsqd is going to broadcast to the lookup
-                    ImmutableMap.of("tcp_port", ExposedPort.tcp(4150)));
+                    ImmutableMap.of("tcp_port", ExposedPort.tcp(4150), "http_port", ExposedPort.tcp(4151)));
 
                 lookupNode = new NsqLookupNode(lookupContainers.get(0).get().containerId, lookupContainers.get(0).get().exposedPortsByName);
 
                 for (final Future<CreatedContainer> createdNsqd : nsqdContainers) {
                     nsqdNodes.add(new NsqdNode(createdNsqd.get().containerId, createdNsqd.get().exposedPortsByName));
                 }
-                final CreatedContainers created = new CreatedContainers(nsqdNodes.build(), lookupNode);
+                final CreatedContainers created = new CreatedContainers(createdNetwork.getId(), nsqdNodes.build(), lookupNode);
                 startContainers(dockerClient, created.getAllContainerIds());
+                return created;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("Interrupted during container creation and start");
             } catch (ExecutionException e) {
                 throw new RuntimeException(e);
             }
-            return new CreatedContainers(nsqdNodes.build(), lookupNode);
         }
 
         private final List<Future<CreatedContainer>> createContainers(final UUID clusterId,
                                                                       final DockerClient dockerClient,
                                                                       final ContainerConfig config,
                                                                       final int count,
+                                                                      final String networkId,
                                                                       final List<String> cmdBindings,
                                                                       final Map<String, ExposedPort> exposedPorts) {
             final ImmutableList.Builder<Future<CreatedContainer>> createdContainers = new ImmutableList.Builder<>();
@@ -192,12 +202,18 @@ public class NsqDockerCluster {
                     .collect(Collectors.toMap(
                                  entry -> entry.getKey(),
                                  entry -> new PortBinding(Ports.Binding.bindPort(randomPort()), entry.getValue())));
+                final HostConfig hostConfig = HostConfig.newHostConfig()
+                    .withNetworkMode("bridge");
                 createdContainers.add(executor.submit(() -> {
                             final CreateContainerResponse response = dockerClient.createContainerCmd(config.image)
                                 .withName(containerName)
+                                .withHostConfig(hostConfig)
                                 .withCmd(cmd)
                                 .withPortBindings(allocatedPorts.values().stream().toArray(PortBinding[]::new))
                                 .exec();
+                            dockerClient.connectToNetworkCmd()
+                                .withContainerId(response.getId())
+                                .withNetworkId(networkId);
                             return new CreatedContainer(response.getId(), containerName, allocatedPorts);
                         }));
             }
@@ -310,17 +326,20 @@ public class NsqDockerCluster {
     private final UUID clusterId;
     private final ExecutorService executor;
     private final DockerClient dockerClient;
+    private final String networkId;
     private final List<NsqdNode> nsqds;
     private final NsqLookupNode lookup;
 
     public NsqDockerCluster(final UUID clusterId,
                             final ExecutorService executor,
                             final DockerClient dockerClient,
+                            final String networkId,
                             final List<NsqdNode> nsqds,
                             final NsqLookupNode lookup)  {
         this.clusterId = clusterId;
         this.executor = executor;
         this.dockerClient = dockerClient;
+        this.networkId = networkId;
         this.nsqds = nsqds;
         this.lookup = lookup;
     }
@@ -356,6 +375,7 @@ public class NsqDockerCluster {
     public void shutdown() {
         stopContainers();
         removeContainers();
+        removeNetwork();
     }
 
     /**
@@ -398,6 +418,10 @@ public class NsqDockerCluster {
         executeForAllContainers(
             executor, getAllContainerIds(),
             containerId -> dockerClient.removeContainerCmd(containerId).exec());
+    }
+
+    private void removeNetwork() {
+        dockerClient.removeNetworkCmd(networkId).exec();
     }
 
     private static void executeForAllContainers(final ExecutorService executor,
