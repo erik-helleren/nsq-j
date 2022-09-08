@@ -92,7 +92,7 @@ public class NsqDockerCluster {
     private static final ContainerConfig DEFAULT_NSQD_CONFIG = new ContainerConfig(
         "nsqio/nsq:v0.3.8",
         "nsqd-cluster-%d-%s",
-        "/nsqd --lookupd-tcp-address=%s --broadcast-address=%s");
+        "/nsqd --lookupd-tcp-address=%s --broadcast-address=%s --msg-timeout=4s");
 
     private static final ContainerConfig DEFAULT_LOOKUP_CONFIG = new ContainerConfig(
         "nsqio/nsq:v0.3.8",
