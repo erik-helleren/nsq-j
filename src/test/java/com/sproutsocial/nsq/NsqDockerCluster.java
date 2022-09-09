@@ -147,7 +147,10 @@ public class NsqDockerCluster {
         }
 
         private CreatedContainers createAndStartContainers(final UUID clusterId, final DockerClient dockerClient) {
-            final CreateNetworkResponse createdNetwork = dockerClient.createNetworkCmd().withName(String.format("nsq-%s", clusterId)).exec();
+            final CreateNetworkResponse createdNetwork = dockerClient.createNetworkCmd()
+                .withName(String.format("nsq-%s", clusterId))
+                .withAttachable(true)
+                .exec();
             final List<Future<CreatedContainer>> lookupContainers = createContainers(
                 clusterId,
                 dockerClient,
@@ -203,10 +206,11 @@ public class NsqDockerCluster {
                                  entry -> entry.getKey(),
                                  entry -> new PortBinding(Ports.Binding.bindPort(randomPort()), entry.getValue())));
                 final HostConfig hostConfig = HostConfig.newHostConfig()
-                    .withNetworkMode("bridge");
+                    .withNetworkMode(networkId);
                 createdContainers.add(executor.submit(() -> {
                             final CreateContainerResponse response = dockerClient.createContainerCmd(config.image)
                                 .withName(containerName)
+                                .withAliases(containerName)
                                 .withHostConfig(hostConfig)
                                 .withCmd(cmd)
                                 .withPortBindings(allocatedPorts.values().stream().toArray(PortBinding[]::new))
