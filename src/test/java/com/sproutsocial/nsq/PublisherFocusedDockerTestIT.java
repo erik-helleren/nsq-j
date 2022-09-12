@@ -100,7 +100,7 @@ public class PublisherFocusedDockerTestIT extends BaseDockerTestIT {
     }
 
     @Test
-    public void withBackup_failoverAndFailbackRightAwayIfBackupGoesDown(){
+    public void withBackup_failoverAndFailbackRightAwayIfBackupGoesDown() {
         publisher = backupPublisher();
         sendAndVerifyMessagesFromPrimary(publisher, handler);
 
@@ -109,7 +109,7 @@ public class PublisherFocusedDockerTestIT extends BaseDockerTestIT {
         sendAndVerifyMessagesFromBackup(publisher, handler);
 
         cluster.reconnectNetworkFor(cluster.getNsqdNodes().get(0));
-        cluster.reconnectNetworkFor(cluster.getNsqdNodes().get(1));
+        cluster.disconnectNetworkFor(cluster.getNsqdNodes().get(1));
 
         sendAndVerifyMessagesFromPrimary(publisher, handler);
     }

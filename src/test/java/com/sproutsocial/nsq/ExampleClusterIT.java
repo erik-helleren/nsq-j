@@ -45,14 +45,11 @@ public class ExampleClusterIT {
 
     @Test
     public void networkDisconnects() throws Exception {
-        final NsqDockerCluster.NsqdNode node = cluster.getNsqdNodes().get(0);
-        logger.info("Sleeping for 30 seconds before disconnecting container: {}, on hostname: {}", node.getContainerId(), node.getTcpHostAndPort());
-        Thread.sleep(30_000);
-        cluster.disconnectNetworkFor(node);
-        logger.info("Sleeping for 30 seconds: Network disconnected");
-        Thread.sleep(30_000);
-        cluster.reconnectNetworkFor(node);
-        logger.info("Sleeping for 30 seconds: Network re-enabled");
-        Thread.sleep(30_000);
+        final NsqDockerCluster.NsqdNode node1 = cluster.getNsqdNodes().get(0);
+        final NsqDockerCluster.NsqdNode node2 = cluster.getNsqdNodes().get(1);
+        cluster.disconnectNetworkFor(node1);
+        cluster.disconnectNetworkFor(node2);
+        cluster.reconnectNetworkFor(node1);
+        cluster.reconnectNetworkFor(node2);
     }
 }
