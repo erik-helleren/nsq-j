@@ -23,10 +23,16 @@ public class TestMessageHandler implements MessageHandler {
     @Override
     public void accept(Message msg) {
         receivedMessages.add((NSQMessage) msg);
+        msg.finish();
+        msg.forceFlush();
     }
 
 
     public List<NSQMessage> drainMessagesOrTimeOut(int size) {
+        return drainMessagesOrTimeOut(size, timeoutMillis);
+    }
+
+    public List<NSQMessage> drainMessagesOrTimeOut(int size, int timeoutMillis) {
         long timeoutTime = System.currentTimeMillis() + timeoutMillis;
         while (receivedMessages.size() < size && System.currentTimeMillis() < timeoutTime) {
             Util.sleepQuietly(100);
@@ -35,7 +41,7 @@ public class TestMessageHandler implements MessageHandler {
             Assert.fail("Timed out waiting for messages.  Received " + receivedMessages.size() + " out of expected " + size);
         }
         List<NSQMessage> drained = new ArrayList<>();
-        receivedMessages.drainTo(drained, size);
+        receivedMessages.drainTo(drained);
         return drained;
     }
 

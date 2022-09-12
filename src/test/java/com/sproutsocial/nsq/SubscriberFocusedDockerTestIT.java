@@ -6,8 +6,6 @@ import org.junit.Test;
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.sproutsocial.nsq.TestBase.messages;
-
 public class SubscriberFocusedDockerTestIT extends BaseDockerTestIT {
 
     private Publisher publisher;
@@ -27,7 +25,7 @@ public class SubscriberFocusedDockerTestIT extends BaseDockerTestIT {
         startSubscriber(handler2,"channelA",null);
         List<String> messages = messages(20, 40);
 
-        send(topic, messages, 1, 100, publisher);
+        send(topic, messages, 1, 200, publisher);
 
         Util.sleepQuietly(1000);
 
@@ -44,19 +42,16 @@ public class SubscriberFocusedDockerTestIT extends BaseDockerTestIT {
     @Test
     public void verySlowConsumer_allMessagesReceivedByResponsiveConsumer(){
         TestMessageHandler handler = new TestMessageHandler();
-        DelayHandler delayHandler = new DelayHandler(8000);
+        NoAckReceiver delayHandler = new NoAckReceiver(8000);
         startSubscriber(handler,"channelA",null);
         startSubscriber(delayHandler,"channelA",null);
         List<String> messages = messages(40, 40);
 
         send(topic, messages, 1, 100, publisher);
 
-        Util.sleepQuietly(1000);
-
-        List<NSQMessage> firstConsumerMessages = handler.drainMessages(20);
-        List<NSQMessage> delayedMessages = delayHandler.drainMessages(20);
-        Assert.assertFalse("Expect first consumer to have received some messages", firstConsumerMessages.isEmpty());
-        Assert.assertFalse("Expect the delayed consumer to have received some messages", delayedMessages.isEmpty());
+        List<NSQMessage> firstConsumerMessages = handler.drainMessagesOrTimeOut(40,15000);
+        List<NSQMessage> delayedMessages = delayHandler.drainMessages(40);
+        Assert.assertFalse("Expect the consumer that doesn't ack to have received some messages", delayedMessages.isEmpty());
 
         validateReceivedAllMessages(messages,firstConsumerMessages,false);
     }
@@ -74,7 +69,7 @@ public class SubscriberFocusedDockerTestIT extends BaseDockerTestIT {
 
     private Subscriber startSubscriber(TestMessageHandler handler, String channel, FailedMessageHandler failedMessageHandler) {
 
-        Subscriber subscriber = new Subscriber(10, cluster.getLookupNode().getTcpHostAndPort().toString());
+        Subscriber subscriber = new Subscriber(client,1,10, cluster.getLookupNode().getHttpHostAndPort().toString());
         subscriber.setDefaultMaxInFlight(1);
         subscriber.setMaxAttempts(5);
         if (failedMessageHandler != null) {

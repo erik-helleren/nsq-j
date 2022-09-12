@@ -11,9 +11,9 @@ import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import static com.sproutsocial.nsq.TestBase.messages;
 import static com.sproutsocial.nsq.TestBase.random;
 import static org.slf4j.LoggerFactory.getLogger;
 
@@ -23,6 +23,8 @@ public class BaseDockerTestIT {
     protected ScheduledExecutorService scheduledExecutorService;
     private static final Logger LOGGER = getLogger(BaseDockerTestIT.class);
     protected Client client;
+
+    private final AtomicInteger messageBatchCounter = new AtomicInteger();
 
     @Before
     public void setup() {
@@ -63,6 +65,21 @@ public class BaseDockerTestIT {
         }
     }
 
+    protected List<String> messages(int count, int maxLen) {
+        List<String> res = new ArrayList<String>(count);
+        int batch = messageBatchCounter.getAndIncrement();
+        for (int i = 0; i < count; i++) {
+            int len = random.nextInt(maxLen);
+            StringBuilder s = new StringBuilder();
+            s.append(String.format("msg %04d batch: %04d len:%04d ", i, batch, len));
+            for (int j = 0; j < len; j++) {
+                s.append((char) (33 + random.nextInt(92)));
+            }
+            res.add(s.toString());
+        }
+        return res;
+    }
+
     protected void sendAndVerifyMessagesFromBackup(Publisher publisher, TestMessageHandler handler) {
         List<String> postFailureMessages = messages(20, 40);
         send(topic, postFailureMessages, 0.5, 10, publisher);
@@ -86,11 +103,13 @@ public class BaseDockerTestIT {
     }
 
     protected Publisher primaryOnlyPublisher() {
-        return new Publisher(client,cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(),null);
+        return new Publisher(client, cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(), null);
     }
 
     protected Publisher backupPublisher() {
-        return new Publisher(client, cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(), cluster.getNsqdNodes().get(1).getTcpHostAndPort().toString());
+        Publisher publisher = new Publisher(client, cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(), cluster.getNsqdNodes().get(1).getTcpHostAndPort().toString());
+        publisher.setFailoverDurationSecs(5);
+        return publisher;
     }
 
     public void validateReceivedAllMessages(List<String> expected, List<NSQMessage> actual, boolean validateOrder) {
@@ -99,7 +118,11 @@ public class BaseDockerTestIT {
         if (!validateOrder) {
             Collections.sort(actualMessages);
             Collections.sort(expectedCopy);
+        }else{
+            validateReceivedAllMessages(expected,actual,false);
+            LOGGER.info("Validated that all the messages are there first before validating order");
+            LOGGER.info("Received messages in receive order: {}",actualMessages);
         }
-        Assert.assertArrayEquals(expected.toArray(), actualMessages.toArray());
+        Assert.assertArrayEquals("Validation with ordering expected?" +validateOrder, expected.toArray(), actualMessages.toArray());
     }
 }
