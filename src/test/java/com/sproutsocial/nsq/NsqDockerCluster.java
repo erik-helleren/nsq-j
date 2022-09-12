@@ -8,9 +8,9 @@ import com.google.common.collect.ImmutableMap;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
@@ -90,12 +90,12 @@ public class NsqDockerCluster {
 
     private static final Logger logger = LoggerFactory.getLogger(NsqDockerCluster.class);
     private static final ContainerConfig DEFAULT_NSQD_CONFIG = new ContainerConfig(
-        "nsqio/nsq:v0.3.8",
+        "nsqio/nsq:v1.2.1",
         "nsqd-cluster-%d-%s",
-        "/nsqd --lookupd-tcp-address=%s --broadcast-address=%s --msg-timeout=4s");
+        "/nsqd --lookupd-tcp-address=%s --broadcast-address=%s --broadcast-tcp-port=%s --broadcast-http-port=%s --msg-timeout=4s");
 
     private static final ContainerConfig DEFAULT_LOOKUP_CONFIG = new ContainerConfig(
-        "nsqio/nsq:v0.3.8",
+        "nsqio/nsq:v1.2.1",
         "nsq-lookup-cluster-%d-%s",
         "/nsqlookupd");
 
@@ -162,16 +162,18 @@ public class NsqDockerCluster {
             final ImmutableList.Builder<NsqdNode> nsqdNodes = new ImmutableList.Builder<>();
             final NsqLookupNode lookupNode;
             try {
+                ImmutableMap<String, ExposedPort> portMap = ImmutableMap.of("tcp_port", ExposedPort.tcp(4150), "http_port", ExposedPort.tcp(4151));
                 final List<Future<CreatedContainer>> nsqdContainers = createContainers(
-                    clusterId,
-                    dockerClient,
-                    nsqdConfig,
-                    nsqdCount,
-                    createdNetwork.getId(),
-                    ImmutableList.of(String.format(
-                                         "%s:%d", lookupContainers.get(0).get().name, 4160),// Lookup TCP hostname and port
-                                     "$${containerName}"), // What address this nsqd is going to broadcast to the lookup
-                    ImmutableMap.of("tcp_port", ExposedPort.tcp(4150), "http_port", ExposedPort.tcp(4151)));
+                        clusterId,
+                        dockerClient,
+                        nsqdConfig,
+                        nsqdCount,
+                        createdNetwork.getId(),
+                        ImmutableList.of(String.format("%s:%d", lookupContainers.get(0).get().name, 4160),// Lookup TCP hostname and port
+                                "127.0.0.1", // What address and ports this nsqd is going to broadcast to the lookup
+                                "$${tcpPort}",
+                                "$${httpPort}"),
+                        portMap);
 
                 lookupNode = new NsqLookupNode(lookupContainers.get(0).get().containerId, lookupContainers.get(0).get().exposedPortsByName);
 
@@ -199,12 +201,14 @@ public class NsqDockerCluster {
             final ImmutableList.Builder<Future<CreatedContainer>> createdContainers = new ImmutableList.Builder<>();
             for (int i = 0; i < count; i++) {
                 final String containerName = String.format(config.nameFormat, i, clusterId);
-                final List<String> cmd = buildCmd(containerName, config.cmdFormat, cmdBindings);
                 final Map<String, PortBinding> allocatedPorts = exposedPorts.entrySet()
-                    .stream()
-                    .collect(Collectors.toMap(
-                                 entry -> entry.getKey(),
-                                 entry -> new PortBinding(Ports.Binding.bindPort(randomPort()), entry.getValue())));
+                        .stream()
+                        .collect(Collectors.toMap(
+                                entry -> entry.getKey(),
+                                entry -> new PortBinding(Ports.Binding.bindPort(randomPort()), entry.getValue())));
+                final List<String> cmd = buildCmd(containerName, allocatedPorts, config.cmdFormat, cmdBindings);
+                logger.info("Startup command: {}", cmd);
+
                 final HostConfig hostConfig = HostConfig.newHostConfig()
                     .withNetworkMode(networkId);
                 createdContainers.add(executor.submit(() -> {
@@ -231,10 +235,12 @@ public class NsqDockerCluster {
         }
 
         private final List<String> buildCmd(final String containerName,
-                                            final String format,
+                                            Map<String, PortBinding> allocatedPorts, final String format,
                                             final List<String> bindings) {
             final List<String> substituted = bindings.stream()
-                .map(binding -> binding.replace("$${containerName}", containerName))
+                    .map(binding -> binding.replace("$${containerName}", containerName))
+                    .map(binding -> binding.replace("$${httpPort}", allocatedPorts.get("http_port").getBinding().getHostPortSpec()))
+                    .map(binding -> binding.replace("$${tcpPort}", allocatedPorts.get("tcp_port").getBinding().getHostPortSpec()))
                 .collect(Collectors.toList());
             return Splitter.on(" ")
                 .splitToList(String.format(format, substituted.stream().toArray(String[]::new)));

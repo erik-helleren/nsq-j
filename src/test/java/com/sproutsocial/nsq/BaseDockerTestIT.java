@@ -22,8 +22,13 @@ public class BaseDockerTestIT {
     protected String topic;
     protected ScheduledExecutorService scheduledExecutorService;
     private static final Logger LOGGER = getLogger(BaseDockerTestIT.class);
+    protected Client client;
+
     @Before
     public void setup() {
+        client = new Client();
+        //A single threaded executor preserves ordering
+        client.setExecutor(Executors.newSingleThreadExecutor());
         cluster = NsqDockerCluster.builder()
                 .withNsqdCount(3)
                 .start();
@@ -35,6 +40,7 @@ public class BaseDockerTestIT {
 
     @After
     public void teardown() throws InterruptedException {
+        client.stop();
 
         cluster.shutdown();
 
@@ -79,11 +85,11 @@ public class BaseDockerTestIT {
     }
 
     protected Publisher primaryOnlyPublisher() {
-        return new Publisher(cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString());
+        return new Publisher(client,cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(),null);
     }
 
     protected Publisher backupPublisher() {
-        return new Publisher(cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(), cluster.getNsqdNodes().get(1).getTcpHostAndPort().toString());
+        return new Publisher(client, cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(), cluster.getNsqdNodes().get(1).getTcpHostAndPort().toString());
     }
 
     public void validateReceivedAllMessages(List<String> expected, List<NSQMessage> actual, boolean validateOrder) {
