@@ -325,6 +325,10 @@ public class NsqDockerCluster {
         public final HostAndPort getTcpHostAndPort() {
             return hostAndPorts.get("tcp_port");
         }
+
+        public HostAndPort getHttpHostAndPort() {
+            return hostAndPorts.get("http_port");
+        }
     }
 
     private final UUID clusterId;

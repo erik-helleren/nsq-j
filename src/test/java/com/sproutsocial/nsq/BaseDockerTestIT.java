@@ -3,6 +3,7 @@ package com.sproutsocial.nsq;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -14,12 +15,13 @@ import java.util.stream.Collectors;
 
 import static com.sproutsocial.nsq.TestBase.messages;
 import static com.sproutsocial.nsq.TestBase.random;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class BaseDockerTestIT {
     protected NsqDockerCluster cluster;
     protected String topic;
     protected ScheduledExecutorService scheduledExecutorService;
-
+    private static final Logger LOGGER = getLogger(BaseDockerTestIT.class);
     @Before
     public void setup() {
         cluster = NsqDockerCluster.builder()
@@ -42,6 +44,7 @@ public class BaseDockerTestIT {
 
     protected void send(String topic, List<String> msgs, double delayChance, int maxDelay, Publisher publisher) {
         int count = 0;
+        LOGGER.info("Sending {} messags to topic {}", msgs.size(), topic);
         for (String msg : msgs) {
             if (random.nextFloat() < delayChance) {
                 Util.sleepQuietly(random.nextInt(maxDelay));
@@ -62,10 +65,10 @@ public class BaseDockerTestIT {
     }
 
     protected void sendAndVerifyMessagesFromPrimary(Publisher publisher, TestMessageHandler handler) {
-        List<String> beforeFailureMessages = messages(20, 40);
-        send(topic, beforeFailureMessages, 0.5f, 10, publisher);
-        List<NSQMessage> preFailureActual = handler.drainMessagesOrTimeOut(beforeFailureMessages.size());
-        validateReceivedAllMessages(beforeFailureMessages, preFailureActual, true);
+        List<String> messages = messages(20, 40);
+        send(topic, messages, 0.5f, 10, publisher);
+        List<NSQMessage> preFailureActual = handler.drainMessagesOrTimeOut(messages.size());
+        validateReceivedAllMessages(messages, preFailureActual, true);
         validateFromParticularNsqd(preFailureActual, 0);
     }
 

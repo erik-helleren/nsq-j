@@ -19,7 +19,7 @@ public class PublisherFocusedDockerTestIT extends BaseDockerTestIT {
         super.setup();
         Util.sleepQuietly(500);
         handler = new TestMessageHandler();
-        subscriber = new Subscriber(10, cluster.getLookupNode().getTcpHostAndPort().toString());
+        subscriber = new Subscriber(1, cluster.getLookupNode().getHttpHostAndPort().toString());
         subscriber.subscribe(topic, "tail" + System.currentTimeMillis() , handler);
 
     }
