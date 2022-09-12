@@ -31,7 +31,8 @@ public class BaseDockerTestIT {
         client.setExecutor(Executors.newSingleThreadExecutor());
         cluster = NsqDockerCluster.builder()
                 .withNsqdCount(3)
-                .start();
+                .start()
+                .awaitExposedPorts();
 
         topic = "topic" + System.currentTimeMillis();
 

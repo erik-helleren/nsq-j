@@ -415,11 +415,21 @@ public class NsqDockerCluster {
     }
 
     public void disconnectNetworkFor(final ConnectableNode node) {
-        // TODO: Cut off the host from the underlying docker network
+        logger.info("Disconnecting network: {} for container: {}", networkId, node.getContainerId());
+        dockerClient.disconnectFromNetworkCmd()
+            .withNetworkId(networkId)
+            .withContainerId(node.getContainerId())
+            .exec();
+        logger.info("Network {} disconnected for container: {}", networkId, node.getContainerId());
     }
 
     public void reconnectNetworkFor(final ConnectableNode node) {
-        // TODO: Re-connect the host from the underlying docker network
+        logger.info("Reconnecting network {} for container: {}", networkId, node.getContainerId());
+        dockerClient.connectToNetworkCmd()
+            .withNetworkId(networkId)
+            .withContainerId(node.getContainerId())
+            .exec();
+        logger.info("Network {} reconnected for container: {}", networkId, node.getContainerId());
     }
 
     private void stopContainers() {
