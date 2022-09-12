@@ -3,6 +3,7 @@ package com.sproutsocial.nsq;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -14,14 +15,20 @@ import java.util.stream.Collectors;
 
 import static com.sproutsocial.nsq.TestBase.messages;
 import static com.sproutsocial.nsq.TestBase.random;
+import static org.slf4j.LoggerFactory.getLogger;
 
 public class BaseDockerTestIT {
     protected NsqDockerCluster cluster;
     protected String topic;
     protected ScheduledExecutorService scheduledExecutorService;
+    private static final Logger LOGGER = getLogger(BaseDockerTestIT.class);
+    protected Client client;
 
     @Before
     public void setup() {
+        client = new Client();
+        //A single threaded executor preserves ordering
+        client.setExecutor(Executors.newSingleThreadExecutor());
         cluster = NsqDockerCluster.builder()
                 .withNsqdCount(3)
                 .start();
@@ -33,6 +40,7 @@ public class BaseDockerTestIT {
 
     @After
     public void teardown() throws InterruptedException {
+        client.stop();
 
         cluster.shutdown();
 
@@ -42,6 +50,7 @@ public class BaseDockerTestIT {
 
     protected void send(String topic, List<String> msgs, double delayChance, int maxDelay, Publisher publisher) {
         int count = 0;
+        LOGGER.info("Sending {} messags to topic {}", msgs.size(), topic);
         for (String msg : msgs) {
             if (random.nextFloat() < delayChance) {
                 Util.sleepQuietly(random.nextInt(maxDelay));
@@ -62,10 +71,10 @@ public class BaseDockerTestIT {
     }
 
     protected void sendAndVerifyMessagesFromPrimary(Publisher publisher, TestMessageHandler handler) {
-        List<String> beforeFailureMessages = messages(20, 40);
-        send(topic, beforeFailureMessages, 0.5f, 10, publisher);
-        List<NSQMessage> preFailureActual = handler.drainMessagesOrTimeOut(beforeFailureMessages.size());
-        validateReceivedAllMessages(beforeFailureMessages, preFailureActual, true);
+        List<String> messages = messages(20, 40);
+        send(topic, messages, 0.5f, 10, publisher);
+        List<NSQMessage> preFailureActual = handler.drainMessagesOrTimeOut(messages.size());
+        validateReceivedAllMessages(messages, preFailureActual, true);
         validateFromParticularNsqd(preFailureActual, 0);
     }
 
@@ -76,11 +85,11 @@ public class BaseDockerTestIT {
     }
 
     protected Publisher primaryOnlyPublisher() {
-        return new Publisher(cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString());
+        return new Publisher(client,cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(),null);
     }
 
     protected Publisher backupPublisher() {
-        return new Publisher(cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(), cluster.getNsqdNodes().get(1).getTcpHostAndPort().toString());
+        return new Publisher(client, cluster.getNsqdNodes().get(0).getTcpHostAndPort().toString(), cluster.getNsqdNodes().get(1).getTcpHostAndPort().toString());
     }
 
     public void validateReceivedAllMessages(List<String> expected, List<NSQMessage> actual, boolean validateOrder) {

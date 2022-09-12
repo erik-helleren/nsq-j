@@ -4,6 +4,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static com.sproutsocial.nsq.TestBase.messages;
@@ -19,7 +20,8 @@ public class PublisherFocusedDockerTestIT extends BaseDockerTestIT {
         super.setup();
         Util.sleepQuietly(500);
         handler = new TestMessageHandler();
-        subscriber = new Subscriber(10, cluster.getLookupNode().getTcpHostAndPort().toString());
+
+        subscriber = new Subscriber(client, 1, 5, cluster.getLookupNode().getHttpHostAndPort().toString());
         subscriber.subscribe(topic, "tail" + System.currentTimeMillis() , handler);
 
     }
@@ -30,6 +32,7 @@ public class PublisherFocusedDockerTestIT extends BaseDockerTestIT {
         if (publisher != null) {
             publisher.stop();
         }
+
         super.teardown();
     }
 
@@ -51,7 +54,6 @@ public class PublisherFocusedDockerTestIT extends BaseDockerTestIT {
         Assert.assertThrows(NSQException.class, () -> send(topic, messages, 0.5f, 10, publisher));
         long totalTimeMillis = System.currentTimeMillis() - startTimeMillis;
         Assert.assertTrue("Waited at least 10 seconds", totalTimeMillis > TimeUnit.SECONDS.toMillis(10));
-
     }
 
     @Test
