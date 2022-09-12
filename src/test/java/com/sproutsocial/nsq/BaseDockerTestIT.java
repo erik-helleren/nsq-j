@@ -96,7 +96,7 @@ public class BaseDockerTestIT {
         validateFromParticularNsqd(preFailureActual, 0);
     }
 
-    private void validateFromParticularNsqd(List<NSQMessage> receivedMessages, int nsqHostIndex) {
+    protected void validateFromParticularNsqd(List<NSQMessage> receivedMessages, int nsqHostIndex) {
         for (NSQMessage e : receivedMessages) {
             Assert.assertEquals(cluster.getNsqdNodes().get(nsqHostIndex).getTcpHostAndPort(), e.getConnection().getHost());
         }

@@ -37,6 +37,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class NsqDockerCluster {
+    public void restartNetworkFor(NsqdNode nsqdNode) {
+        disconnectNetworkFor(nsqdNode);
+        reconnectNetworkFor(nsqdNode);
+    }
+
     public static class ContainerConfig {
         public String image;
         public String nameFormat;
