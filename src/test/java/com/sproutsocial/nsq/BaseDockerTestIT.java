@@ -8,13 +8,13 @@ import org.slf4j.Logger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import static com.sproutsocial.nsq.TestBase.random;
 import static org.slf4j.LoggerFactory.getLogger;
 
 public class BaseDockerTestIT {
@@ -54,6 +54,7 @@ public class BaseDockerTestIT {
     protected void send(String topic, List<String> msgs, double delayChance, int maxDelay, Publisher publisher) {
         int count = 0;
         LOGGER.info("Sending {} messags to topic {}", msgs.size(), topic);
+        Random random = new Random();
         for (String msg : msgs) {
             if (random.nextFloat() < delayChance) {
                 Util.sleepQuietly(random.nextInt(maxDelay));
@@ -66,8 +67,9 @@ public class BaseDockerTestIT {
     }
 
     protected List<String> messages(int count, int len) {
-        List<String> res = new ArrayList<String>(count);
+        List<String> res = new ArrayList<>(count);
         int batch = messageBatchCounter.getAndIncrement();
+        Random random = new Random();
         for (int i = 0; i < count; i++) {
             StringBuilder s = new StringBuilder();
             s.append(String.format("msg %04d batch: %04d len:%04d ", i, batch, len));
