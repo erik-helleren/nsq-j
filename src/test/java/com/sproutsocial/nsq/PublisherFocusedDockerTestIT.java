@@ -54,6 +54,35 @@ public class PublisherFocusedDockerTestIT extends BaseDockerTestIT {
     }
 
     @Test
+    public void testBatcherPublish_noBackup(){
+        // This method tests both the batcher/buffered publish as well as the arraylist publish
+        publisher = primaryOnlyPublisher();
+        List<String> messages = messages(20, 40);
+        for (String message : messages) {
+            publisher.publishBuffered(topic,message.getBytes());
+        }
+        List<NSQMessage> receivedMessages = handler.drainMessagesOrTimeOut(messages.size());
+        validateReceivedAllMessages(messages, receivedMessages, true);
+    }
+
+    @Test
+    public void testDeferredPublish_noBackup(){
+        publisher = primaryOnlyPublisher();
+        int delayMillis = 500;
+        List<String> messages = messages(5, 40);
+        for (String message : messages) {
+            publisher.publishDeferred(topic,message.getBytes(), delayMillis,TimeUnit.MILLISECONDS);
+        }
+        Util.sleepQuietly(delayMillis/2);
+        List<NSQMessage> shouldBeEmpty = handler.drainMessages(messages.size());
+        Assert.assertTrue("Not expecting any messages yet since we are publishing defered", shouldBeEmpty.isEmpty());
+
+        Util.sleepQuietly(delayMillis/2);
+        List<NSQMessage> receivedMessages = handler.drainMessagesOrTimeOut(messages.size());
+        validateReceivedAllMessages(messages, receivedMessages, true);
+    }
+
+    @Test
     public void testBasicRoundTrip_noBackup_primaryNsqDownThenRecovers() {
         publisher = primaryOnlyPublisher();
         cluster.disconnectNetworkFor(cluster.getNsqdNodes().get(0));

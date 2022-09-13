@@ -65,11 +65,10 @@ public class BaseDockerTestIT {
         }
     }
 
-    protected List<String> messages(int count, int maxLen) {
+    protected List<String> messages(int count, int len) {
         List<String> res = new ArrayList<String>(count);
         int batch = messageBatchCounter.getAndIncrement();
         for (int i = 0; i < count; i++) {
-            int len = random.nextInt(maxLen);
             StringBuilder s = new StringBuilder();
             s.append(String.format("msg %04d batch: %04d len:%04d ", i, batch, len));
             for (int j = 0; j < len; j++) {
@@ -91,9 +90,9 @@ public class BaseDockerTestIT {
     protected void sendAndVerifyMessagesFromPrimary(Publisher publisher, TestMessageHandler handler) {
         List<String> messages = messages(20, 40);
         send(topic, messages, 0.5f, 10, publisher);
-        List<NSQMessage> preFailureActual = handler.drainMessagesOrTimeOut(messages.size());
-        validateReceivedAllMessages(messages, preFailureActual, true);
-        validateFromParticularNsqd(preFailureActual, 0);
+        List<NSQMessage> receivedMessages = handler.drainMessagesOrTimeOut(messages.size());
+        validateReceivedAllMessages(messages, receivedMessages, true);
+        validateFromParticularNsqd(receivedMessages, 0);
     }
 
     protected void validateFromParticularNsqd(List<NSQMessage> receivedMessages, int nsqHostIndex) {
@@ -118,11 +117,13 @@ public class BaseDockerTestIT {
         if (!validateOrder) {
             Collections.sort(actualMessages);
             Collections.sort(expectedCopy);
-        }else{
-            validateReceivedAllMessages(expected,actual,false);
+        } else {
+            validateReceivedAllMessages(expected, actual, false);
             LOGGER.info("Validated that all the messages are there first before validating order");
-            LOGGER.info("Received messages in receive order: {}",actualMessages);
+            if (actualMessages.size() < 100) {
+                LOGGER.info("Received messages in receive order: {}", actualMessages);
+            }
         }
-        Assert.assertArrayEquals("Validation with ordering expected?" +validateOrder, expected.toArray(), actualMessages.toArray());
+        Assert.assertArrayEquals("Validation with ordering expected?" + validateOrder, expected.toArray(), actualMessages.toArray());
     }
 }
